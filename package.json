@@ -11,7 +11,8 @@
     "build-win": "electron-builder build -w",
     "make": "electron-forge make",
     "release": "electron-forge publish",
-    "lint": "eslint . --ext js,ts"
+    "lint": "eslint . --ext js,ts",
+    "clear-ever-found": "node scripts/clear-history.js"
   },
   "keywords": [],
   "license": "ISC",
