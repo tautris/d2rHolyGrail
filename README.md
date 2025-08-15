@@ -1,3 +1,6 @@
+# Fork changes
+With added "ever found" item tracking. Meaning grail progress is tracked even if an item is sold/dropped, hence no need to make a ton of mules. Changes made with Claude Code.
+
 # Holy Grail
 Application for automatic tracking of Holy Grail challenge progress in Diablo 2 Resurrected (for offline characters)
 Made with Electron, React and Typescript.
