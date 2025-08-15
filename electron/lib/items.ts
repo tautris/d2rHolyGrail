@@ -7,7 +7,7 @@ import { existsSync, promises } from 'fs';
 import { basename, extname, join, resolve, sep } from 'path';
 import { IpcMainEvent } from 'electron/renderer';
 import { readdirSync } from 'original-fs';
-import { AvailableRunes, FileReaderResponse, GameMode, GrailType, Item, ItemDetails, ItemNotes, RuneType } from '../../src/@types/main.d';
+import { AvailableRunes, FileReaderResponse, GameMode, GrailType, Item, ItemDetails, ItemNotes, RuneType, EverFoundItems, FoundItem } from '../../src/@types/main.d';
 import storage from 'electron-json-storage';
 import chokidar, { FSWatcher } from 'chokidar';
 import { getHolyGrailSeedData, runesSeed } from './holyGrailSeedData';
@@ -26,6 +26,7 @@ class ItemsStore {
   filesChanged: boolean;
   readingFiles: boolean;
   itemNotes: ItemNotes | null;
+  everFound: EverFoundItems | null;
 
   constructor() {
     this.currentData = {
@@ -39,6 +40,7 @@ class ItemsStore {
     this.filesChanged = false;
     this.readingFiles = false;
     this.itemNotes = null;
+    this.everFound = null;
     setInterval(this.tickReader, 500);
     try { d2s.getConstantData(96); } catch (e) { d2s.setConstantData(96, constants96); }
     try { d2s.getConstantData(97); } catch (e) { d2s.setConstantData(97, constants96); }
@@ -68,15 +70,20 @@ class ItemsStore {
     );
   }
 
-  loadManualItems = () => {
+  loadManualItems = async () => {
     const data = (storage.getSync('manualItems') as FileReaderResponse);
+    
+    // Load ever found items for manual mode too
+    await this.getEverFound();
+    
     if (!data.items) {
       storage.set('manualItems', { items: {}, ethItems: {}, stats: {} }, (err) => {
         if (err) {
           console.log(err);
         }
       });
-      this.currentData = { items: {}, ethItems: {}, stats: {}, availableRunes: {} }
+      this.currentData = { items: {}, ethItems: {}, stats: {}, availableRunes: {} };
+      await this.mergeEverFoundIntoResults(this.currentData);
     } else {
       // for compatibility with older manual items format
       if (!data.ethItems) {
@@ -95,13 +102,26 @@ class ItemsStore {
       })
 
       this.currentData = data;
+      await this.mergeEverFoundIntoResults(this.currentData);
       this.fillInAvailableRunes();
     }
   }
 
-  saveManualItem = (itemId: string, count: number) => {
+  saveManualItem = async (itemId: string, count: number) => {
     if (count > 0) {
       this.currentData.items[itemId] = this.createManualItem(count);
+      
+      // Add to ever found items if not already there
+      await this.getEverFound();
+      if (!this.everFound![itemId]) {
+        this.everFound![itemId] = {
+          name: itemId,
+          type: 'manual',
+          foundAt: Date.now(),
+          ethereal: false,
+        };
+        await this.saveEverFound();
+      }
     } else if (this.currentData.items[itemId]) {
       delete (this.currentData.items[itemId]);
     }
@@ -112,9 +132,22 @@ class ItemsStore {
     });
   }
   
-  saveManualEthItem = (itemId: string, count: number) => {
+  saveManualEthItem = async (itemId: string, count: number) => {
     if (count > 0) {
       this.currentData.ethItems[itemId] = this.createManualItem(count);
+      
+      // Add to ever found items if not already there
+      await this.getEverFound();
+      const key = `${itemId}_eth`;
+      if (!this.everFound![key]) {
+        this.everFound![key] = {
+          name: itemId,
+          type: 'manual',
+          foundAt: Date.now(),
+          ethereal: true,
+        };
+        await this.saveEverFound();
+      }
     } else if (this.currentData.ethItems[itemId]) {
       delete (this.currentData.ethItems[itemId]);
     }
@@ -161,6 +194,106 @@ class ItemsStore {
       });
     }
     return this.itemNotes || {};
+  }
+
+  getEverFound = async (): Promise<EverFoundItems> => {
+    if (!!this.everFound) {
+      return this.everFound;
+    }
+    this.everFound = await new Promise((resolve, reject) => {
+      storage.get('everFound', (err, data) => {
+        if (err) reject(err);
+        resolve(data as EverFoundItems);
+      });
+    });
+    return this.everFound || {};
+  }
+
+  saveEverFound = async (): Promise<void> => {
+    if (this.everFound) {
+      storage.set('everFound', this.everFound, (err) => {
+        if (err) {
+          console.log(err);
+        }
+      });
+    }
+  }
+
+  clearEverFound = async (): Promise<void> => {
+    this.everFound = {};
+    storage.remove('everFound', (err) => {
+      if (err) {
+        console.log(err);
+      }
+    });
+  }
+
+  mergeEverFoundIntoResults = async (results: FileReaderResponse): Promise<void> => {
+    await this.getEverFound();
+    const history = this.everFound || {};
+
+    // For each item in history, add it to results if not already there
+    Object.keys(history).forEach(historyKey => {
+      const foundItem = history[historyKey];
+      const isEth = historyKey.endsWith('_eth');
+      const itemName = isEth ? historyKey.replace('_eth', '') : historyKey;
+      
+      const targetCollection = isEth ? results.ethItems : results.items;
+      
+      // If item is not currently in saves, add it as a "history" entry
+      if (!targetCollection[itemName]) {
+        targetCollection[itemName] = {
+          name: itemName,
+          type: foundItem.type,
+          inSaves: {
+            "Found Previously": [{
+              ethereal: foundItem.ethereal || false,
+              ilevel: foundItem.ilevel || null,
+              socketed: foundItem.socketed || false,
+            }]
+          }
+        };
+      }
+    });
+
+    // Add ever found items to results for reference
+    results.everFound = this.everFound || {};
+  }
+
+  detectNewlyFoundItems = async (newResults: FileReaderResponse): Promise<FoundItem[]> => {
+    const newlyFound: FoundItem[] = [];
+    const now = Date.now();
+
+    // Load existing ever found items to check what we've found before
+    await this.getEverFound();
+    const existingHistory = this.everFound || {};
+
+    // Check both regular items and eth items
+    const checkItems = (currentItems: {[key: string]: Item}, isEth: boolean = false) => {
+      Object.keys(currentItems).forEach((itemName) => {
+        const item = currentItems[itemName];
+        const historyKey = isEth ? `${itemName}_eth` : itemName;
+        
+        // If this item has never been found before, it's newly found
+        if (!existingHistory[historyKey]) {
+          const firstSaveInstances = item.inSaves ? Object.values(item.inSaves)[0] as ItemDetails[] : [];
+          newlyFound.push({
+            name: itemName,
+            type: item.type,
+            foundAt: now,
+            ethereal: isEth,
+            // Take details from first instance
+            ilevel: firstSaveInstances[0]?.ilevel || null,
+            socketed: firstSaveInstances[0]?.socketed || false,
+          });
+        }
+      });
+    };
+
+    checkItems(newResults.items, false);
+    checkItems(newResults.ethItems, true);
+
+    return newlyFound;
   }
 
   openAndParseSaves = (event: IpcMainEvent) => {
@@ -304,13 +437,32 @@ class ItemsStore {
           results.stats[saveName] = null;
         })
     });
-    return Promise.all(promises).then(() => {
+    return Promise.all(promises).then(async () => {
       if (userRequested && path && path !== '') {
         settingsStore.saveSetting('saveDir', path);
       }
       if (erroringSaves.length) {
         event.reply('errorReadingSaveFile', erroringSaves);
       }
+
+      // Detect newly found items by checking against persistent history
+      const newlyFound = await this.detectNewlyFoundItems(results);
+      
+      // Add newly found items to persistent history
+      if (newlyFound.length > 0) {
+        console.log(`Found ${newlyFound.length} new items:`, newlyFound.map(item => item.name));
+        newlyFound.forEach(item => {
+          const key = item.ethereal ? `${item.name}_eth` : item.name;
+          if (!this.everFound![key]) {
+            this.everFound![key] = item;
+          }
+        });
+        await this.saveEverFound();
+      }
+
+      // Merge ever found items into current results so they appear as "found"
+      await this.mergeEverFoundIntoResults(results);
+
       event.reply('openFolder', results);
       this.currentData = results;
       updateDataToListeners();

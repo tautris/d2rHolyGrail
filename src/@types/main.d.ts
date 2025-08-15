@@ -31,6 +31,7 @@ export type FileReaderResponse = {
   ethItems: ItemsInSaves,
   stats: SaveFileStats,
   availableRunes: AvailableRunes,
+  everFound?: EverFoundItems,
 }
 
 export type RuneType = "r01" | "r02" | "r03" | "r04" | "r05" | "r06" | "r07" | "r08" | "r09" | "r10" |
@@ -129,4 +130,17 @@ export type RuneRecipeStep = {
   targetRune: RuneType,
   sourceRune: RuneType,
   inSaves: string[],
+}
+
+export type FoundItem = {
+  name: string,
+  type: string,
+  foundAt: number, // timestamp when first found
+  ethereal?: boolean,
+  ilevel?: number | null,
+  socketed?: boolean,
+}
+
+export type EverFoundItems = {
+  [itemName: string]: FoundItem,
 }

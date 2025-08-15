@@ -56,6 +56,9 @@ export const api = {
   setItemNote: (itemName: string, note: string) => {
     ipcRenderer.send('setItemNote', itemName, note);
   },
+  clearEverFound: () => {
+    ipcRenderer.send('clearEverFound');
+  },
   on: (channel: string, callback: Function) => {
     ipcRenderer.removeAllListeners(channel);
     ipcRenderer.on(channel, (_, data) => callback(data))

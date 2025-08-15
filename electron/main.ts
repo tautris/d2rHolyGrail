@@ -113,22 +113,22 @@ async function registerListeners () {
   ipcMain.on('saveImage', (event, data: string) => {
     saveImage(data);
   });
-  ipcMain.on('loadManualItems', (event) => {
+  ipcMain.on('loadManualItems', async (event) => {
     eventToReply = event;
-    itemsDatabase.loadManualItems();
+    await itemsDatabase.loadManualItems();
     event.reply('openFolder', itemsDatabase.getItems());
     updateDataToListeners();
   });
-  ipcMain.on('saveManualItem', (event, itemId, count) => {
+  ipcMain.on('saveManualItem', async (event, itemId, count) => {
     eventToReply = event;
-    itemsDatabase.saveManualItem(itemId, count);
+    await itemsDatabase.saveManualItem(itemId, count);
     itemsDatabase.fillInAvailableRunes();
     event.reply('openFolder', itemsDatabase.getItems());
     updateDataToListeners();
   });
-  ipcMain.on('saveManualEthItem', (event, itemId, count) => {
+  ipcMain.on('saveManualEthItem', async (event, itemId, count) => {
     eventToReply = event;
-    itemsDatabase.saveManualEthItem(itemId, count);
+    await itemsDatabase.saveManualEthItem(itemId, count);
     event.reply('openFolder', itemsDatabase.getItems());
     updateDataToListeners();
   });
@@ -147,6 +147,11 @@ async function registerListeners () {
   ipcMain.on('setItemNote', (event, itemName, note) => {
     eventToReply = event;
     itemsDatabase.setItemNote(itemName, note).then((items) => event.reply('getItemNotes', items))
+  });
+  ipcMain.on('clearEverFound', async (event) => {
+    eventToReply = event;
+    await itemsDatabase.clearEverFound();
+    event.reply('everFoundCleared');
   });
 }
 
